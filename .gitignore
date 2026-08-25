@@ -1,0 +1,13 @@
+.DS_Store
+.context/
+.agents/skills/
+.claude/skills/
+.cache/
+coverage/
+dist/
+dist_swift-node/
+node_modules/
+out/
+release/
+*.tgz
+tests/fixtures/*/pnpm-lock.yaml

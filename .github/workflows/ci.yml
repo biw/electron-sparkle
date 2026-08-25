@@ -1,0 +1,122 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_call:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: voidzero-dev/setup-vp@v1.18.0
+        with:
+          node-version: '24'
+          cache: true
+          run-install: |
+            - args: ['--frozen-lockfile']
+      - run: vp run check
+
+  cross-platform:
+    name: Install (${{ matrix.os }})
+    needs: package-and-fixtures
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: voidzero-dev/setup-vp@v1.18.0
+        with:
+          node-version: '24'
+          cache: true
+          run-install: |
+            - args: ['--frozen-lockfile']
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-packages
+          path: release
+      - run: vp run test:cross-platform-install
+
+  native:
+    name: Native (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: voidzero-dev/setup-vp@v1.18.0
+        with:
+          node-version: '24'
+          cache: true
+          run-install: |
+            - args: ['--frozen-lockfile']
+      - run: vp run build
+      - run: lipo -archs dist/electron_sparkle.darwin-${{ matrix.arch }}.node
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.arch }}
+          path: dist/electron_sparkle.darwin-${{ matrix.arch }}.node
+          if-no-files-found: error
+
+  package-and-fixtures:
+    name: Universal package and fixtures
+    needs:
+      - quality
+      - native
+    runs-on: macos-15
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: voidzero-dev/setup-vp@v1.18.0
+        with:
+          node-version: '24'
+          cache: true
+          run-install: |
+            - args: ['--frozen-lockfile']
+      - run: vp run build
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-arm64
+          path: dist
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-x64
+          path: dist
+      - run: vp run verify:native
+      - run: mkdir -p release
+      - run: vp pm pack --pack-destination release -- --config.ignore-scripts=true
+      - run: vp run verify:packages
+      - run: vp -C tests/fixtures/electron-builder install -- --lockfile=false
+      - run: vp -C tests/fixtures/electron-forge install -- --lockfile=false
+      - run: vp -C tests/fixtures/electron-builder run typecheck
+      - run: vp -C tests/fixtures/electron-builder run verify:module-hook
+      - run: vp -C tests/fixtures/electron-forge run typecheck
+      - run: vp -C tests/fixtures/electron-builder exec electron-builder --config electron-builder.config.mjs --mac dir --universal --publish never
+      - run: vp -C tests/fixtures/electron-forge exec electron-forge package --arch arm64 --platform darwin
+      - run: vp run verify:fixtures
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-packages
+          path: release/electron-sparkle-*.tgz
+          if-no-files-found: error

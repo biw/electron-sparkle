@@ -1,0 +1,23 @@
+{
+  "name": "electron-sparkle-builder-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "description": "electron-sparkle Electron Builder integration fixture",
+  "main": "main.cjs",
+  "scripts": {
+    "typecheck": "tsc --ignoreConfig --noEmit --strict --skipLibCheck --module NodeNext --moduleResolution NodeNext --target ES2022 config-types.ts",
+    "verify:module-hook": "node verify-module-hook.mjs"
+  },
+  "dependencies": {
+    "electron-sparkle": "file:../../../release/electron-sparkle-0.1.0.tgz"
+  },
+  "devDependencies": {
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.22.0"
+}

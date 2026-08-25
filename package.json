@@ -1,0 +1,103 @@
+{
+  "name": "electron-sparkle",
+  "version": "0.1.0",
+  "description": "Sparkle updates for Electron applications on macOS",
+  "keywords": [
+    "electron",
+    "macos",
+    "sparkle",
+    "updater"
+  ],
+  "homepage": "https://github.com/biw/electron-sparkle#readme",
+  "bugs": {
+    "url": "https://github.com/biw/electron-sparkle/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/biw/electron-sparkle.git"
+  },
+  "bin": {
+    "electron-sparkle": "dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "LICENSE",
+    "README.md"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./electron-builder": {
+      "types": "./dist/electron-builder.d.ts",
+      "import": "./dist/electron-builder.js",
+      "require": "./dist/electron-builder.cjs"
+    },
+    "./electron-forge": {
+      "types": "./dist/electron-forge.d.ts",
+      "import": "./dist/electron-forge.js",
+      "require": "./dist/electron-forge.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node scripts/prepare-sparkle.ts && vp pack",
+    "check": "vp check && vp test && vp run build",
+    "format": "vp fmt --write",
+    "format:check": "vp fmt --check",
+    "lint": "vp lint",
+    "prepublish": "node scripts/prepare-publish.ts",
+    "prepare": "vp exec skills experimental_install",
+    "prepare:sparkle": "node scripts/prepare-sparkle.ts",
+    "test": "vp test",
+    "test:cross-platform-install": "node scripts/test-cross-platform-install.ts",
+    "typecheck": "vp check --no-fmt --no-lint",
+    "verify:fixtures": "node scripts/verify-fixtures.ts",
+    "verify:native": "node scripts/verify-native.ts",
+    "verify:packages": "node scripts/verify-package-tarballs.ts"
+  },
+  "dependencies": {
+    "plist": "5.0.0"
+  },
+  "devDependencies": {
+    "@actions/artifact": "6.2.1",
+    "@types/node": "^24.10.0",
+    "skills": "1.5.23",
+    "swift-node": "1.0.1",
+    "swift-node-unplugin": "1.0.1",
+    "typescript": "7.0.2",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "electron": ">=42"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "swiftNode": {
+    "shipSwiftRuntime": false,
+    "swiftCompilerFlags": [
+      "-F",
+      ".cache",
+      "-framework",
+      "Sparkle"
+    ],
+    "linkerFlags": [
+      "-F",
+      ".cache",
+      "-framework",
+      "Sparkle",
+      "-Wl,-rpath,@loader_path"
+    ]
+  }
+}
