@@ -33,9 +33,13 @@ interface StreamHandle {
 interface StreamNativeModule {
   start?: unknown
   checkForUpdates?: unknown
+  checkForUpdatesInBackground?: unknown
+  continueRelaunch?: unknown
   getState?: unknown
+  setHTTPHeaders?: unknown
   setAutomaticallyChecksForUpdates?: unknown
   setAutomaticallyDownloadsUpdates?: unknown
+  setRelaunchPostponementEnabled?: unknown
   subscribe?: unknown
   events?: unknown
   createAdapter?: unknown
@@ -120,19 +124,38 @@ export function toNativeAdapter(nativeModule: unknown): NativeSparkleAdapter {
   const module = unwrapModule(nativeModule)
   assertFunction(module, 'start')
   assertFunction(module, 'checkForUpdates')
+  assertFunction(module, 'checkForUpdatesInBackground')
+  assertFunction(module, 'continueRelaunch')
   assertFunction(module, 'getState')
+  assertFunction(module, 'setHTTPHeaders')
   assertFunction(module, 'setAutomaticallyChecksForUpdates')
   assertFunction(module, 'setAutomaticallyDownloadsUpdates')
+  assertFunction(module, 'setRelaunchPostponementEnabled')
+
+  const continueRelaunch = (requestID: string): boolean => {
+    const result = module.continueRelaunch!(requestID)
+    if (typeof result !== 'boolean') {
+      throw new SparkleUpdaterError(
+        'NATIVE_MODULE_INVALID',
+        'The electron-sparkle native addon returned an invalid relaunch continuation result.',
+      )
+    }
+    return result
+  }
 
   if (typeof module.subscribe === 'function') {
     return {
       start: () => module.start!(),
       checkForUpdates: () => module.checkForUpdates!(),
+      checkForUpdatesInBackground: () => module.checkForUpdatesInBackground!(),
+      continueRelaunch,
       getState: () => module.getState!() as ReturnType<NativeSparkleAdapter['getState']>,
+      setHTTPHeaders: (headers) => module.setHTTPHeaders!(headers),
       setAutomaticallyChecksForUpdates: (enabled) =>
         module.setAutomaticallyChecksForUpdates!(enabled),
       setAutomaticallyDownloadsUpdates: (enabled) =>
         module.setAutomaticallyDownloadsUpdates!(enabled),
+      setRelaunchPostponementEnabled: (enabled) => module.setRelaunchPostponementEnabled!(enabled),
       subscribe: (listener) => module.subscribe!(listener) as NativeUnsubscribe | void,
     }
   }
@@ -141,11 +164,15 @@ export function toNativeAdapter(nativeModule: unknown): NativeSparkleAdapter {
     return {
       start: () => module.start!(),
       checkForUpdates: () => module.checkForUpdates!(),
+      checkForUpdatesInBackground: () => module.checkForUpdatesInBackground!(),
+      continueRelaunch,
       getState: () => module.getState!() as ReturnType<NativeSparkleAdapter['getState']>,
+      setHTTPHeaders: (headers) => module.setHTTPHeaders!(headers),
       setAutomaticallyChecksForUpdates: (enabled) =>
         module.setAutomaticallyChecksForUpdates!(enabled),
       setAutomaticallyDownloadsUpdates: (enabled) =>
         module.setAutomaticallyDownloadsUpdates!(enabled),
+      setRelaunchPostponementEnabled: (enabled) => module.setRelaunchPostponementEnabled!(enabled),
       subscribe: (listener) => {
         const stream = module.events as (
           onValue: (event: unknown) => void,

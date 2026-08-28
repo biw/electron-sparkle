@@ -9,6 +9,7 @@ export type SparkleUpdaterErrorCode =
   | 'NATIVE_MODULE_NOT_FOUND'
   | 'NATIVE_MODULE_INVALID'
   | 'NATIVE_MODULE_LOAD_FAILED'
+  | 'BEFORE_RELAUNCH_HANDLER_FAILED'
 
 export interface SparkleUpdaterErrorOptions {
   cause?: unknown

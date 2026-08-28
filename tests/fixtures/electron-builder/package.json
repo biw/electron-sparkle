@@ -9,7 +9,7 @@
     "verify:module-hook": "node verify-module-hook.mjs"
   },
   "dependencies": {
-    "electron-sparkle": "file:../../../release/electron-sparkle-0.1.0.tgz"
+    "electron-sparkle": "file:../../../release/electron-sparkle-0.2.0.tgz"
   },
   "devDependencies": {
     "electron": "43.4.1",

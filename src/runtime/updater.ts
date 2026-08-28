@@ -8,6 +8,8 @@ import {
 } from './environment.ts'
 import { loadNativeAdapter, type NativeLoaderContext } from './native-loader.ts'
 import type {
+  SparkleBeforeRelaunchHandler,
+  SparkleHTTPHeaders,
   SparkleUpdate,
   SparkleUpdater,
   SparkleUpdaterEvent,
@@ -37,8 +39,11 @@ export function createSparkleUpdater(options: CreateSparkleUpdaterOptions = {}):
   const runtimeProcess = options.process ?? process
   const getElectron = options.getElectron ?? getElectronModule
   const listeners = new Map<SparkleUpdaterEventType, Set<(event: SparkleUpdaterEvent) => void>>()
+  const handledRelaunchRequestIDs = new Set<string>()
   let adapter: NativeSparkleAdapter | undefined
   let adapterPromise: Promise<NativeSparkleAdapter> | undefined
+  let beforeRelaunchHandler: SparkleBeforeRelaunchHandler | null = null
+  let httpHeaders: Record<string, string> = {}
   let startPromise: Promise<void> | undefined
   let started = false
 
@@ -82,6 +87,8 @@ export function createSparkleUpdater(options: CreateSparkleUpdaterOptions = {}):
         .then((nativeAdapter) => {
           const subscription = nativeAdapter.subscribe(dispatchNativeEvent)
           try {
+            nativeAdapter.setHTTPHeaders({ ...httpHeaders })
+            nativeAdapter.setRelaunchPostponementEnabled(beforeRelaunchHandler !== null)
             nativeAdapter.start()
             started = true
             dispatch({ type: 'state-changed', state: getState() })
@@ -109,7 +116,28 @@ export function createSparkleUpdater(options: CreateSparkleUpdaterOptions = {}):
       requireStarted().checkForUpdates()
     },
 
+    checkForUpdatesInBackground(): void {
+      validate()
+      requireStarted().checkForUpdatesInBackground()
+    },
+
     getState,
+
+    setHTTPHeaders(headers: SparkleHTTPHeaders): void {
+      const copiedHeaders = copyHTTPHeaders(headers)
+      if (started) {
+        requireStarted().setHTTPHeaders(copiedHeaders)
+      }
+      httpHeaders = copiedHeaders
+    },
+
+    setBeforeRelaunchHandler(handler: SparkleBeforeRelaunchHandler | null): void {
+      assertBeforeRelaunchHandler(handler)
+      if (started) {
+        requireStarted().setRelaunchPostponementEnabled(handler !== null)
+      }
+      beforeRelaunchHandler = handler
+    },
 
     setAutomaticallyChecksForUpdates(enabled: boolean): void {
       assertBoolean(enabled, 'setAutomaticallyChecksForUpdates')
@@ -145,6 +173,11 @@ export function createSparkleUpdater(options: CreateSparkleUpdaterOptions = {}):
   }
 
   function dispatchNativeEvent(value: unknown): void {
+    if (isRecord(value) && value.type === 'relaunch-requested') {
+      handleRelaunchRequest(value)
+      return
+    }
+
     const event = normalizeEvent(value, started)
     if (event) {
       dispatch(event)
@@ -169,6 +202,69 @@ export function createSparkleUpdater(options: CreateSparkleUpdaterOptions = {}):
         })
       }
     }
+  }
+
+  function handleRelaunchRequest(value: Record<string, unknown>): void {
+    const requestID = value.relaunchRequestID
+    if (typeof requestID !== 'string' || requestID.length === 0) {
+      dispatchInvalidNativeEvent('The native addon emitted an invalid relaunch request.')
+      return
+    }
+    if (handledRelaunchRequestIDs.has(requestID)) {
+      return
+    }
+    handledRelaunchRequestIDs.add(requestID)
+
+    const update = normalizeUpdate(value.update)
+    if (!update) {
+      dispatchInvalidNativeEvent('The native addon emitted a relaunch request without an update.')
+      continueRelaunch(requestID)
+      return
+    }
+
+    const handler = beforeRelaunchHandler
+    if (!handler) {
+      continueRelaunch(requestID)
+      return
+    }
+
+    void Promise.resolve()
+      .then(() => handler(update))
+      .then(
+        () => continueRelaunch(requestID),
+        () => {
+          dispatch({
+            type: 'error',
+            error: new SparkleUpdaterError(
+              'BEFORE_RELAUNCH_HANDLER_FAILED',
+              'The application failed to prepare for the update relaunch.',
+            ),
+          })
+          continueRelaunch(requestID)
+        },
+      )
+  }
+
+  function continueRelaunch(requestID: string): void {
+    try {
+      adapter?.continueRelaunch(requestID)
+    } catch (cause) {
+      dispatch({
+        type: 'error',
+        error: new SparkleUpdaterError(
+          'NATIVE_MODULE_INVALID',
+          'The native addon could not continue the postponed update relaunch.',
+          { cause },
+        ),
+      })
+    }
+  }
+
+  function dispatchInvalidNativeEvent(message: string): void {
+    dispatch({
+      type: 'error',
+      error: new SparkleUpdaterError('NATIVE_MODULE_INVALID', message),
+    })
   }
 
   function requireStarted(): NativeSparkleAdapter {
@@ -334,6 +430,43 @@ function assertBoolean(value: boolean, methodName: string): void {
   }
 }
 
+function assertBeforeRelaunchHandler(
+  value: unknown,
+): asserts value is SparkleBeforeRelaunchHandler | null {
+  if (value !== null && typeof value !== 'function') {
+    throw new TypeError('setBeforeRelaunchHandler expects a function or null.')
+  }
+}
+
+const HTTP_HEADER_NAME_PATTERN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/
+
+function copyHTTPHeaders(value: unknown): Record<string, string> {
+  if (!isPlainRecord(value) || Object.getOwnPropertySymbols(value).length > 0) {
+    throw new TypeError('setHTTPHeaders expects a plain string-to-string object.')
+  }
+
+  const normalizedNames = new Set<string>()
+  const entries: Array<[string, string]> = []
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    const headerValue = 'value' in descriptor ? descriptor.value : undefined
+    const normalizedName = name.toLowerCase()
+    if (
+      !descriptor.enumerable ||
+      !HTTP_HEADER_NAME_PATTERN.test(name) ||
+      typeof headerValue !== 'string' ||
+      headerValue.includes('\r') ||
+      headerValue.includes('\n') ||
+      normalizedNames.has(normalizedName)
+    ) {
+      throw new TypeError('setHTTPHeaders received an invalid header object.')
+    }
+    normalizedNames.add(normalizedName)
+    entries.push([name, headerValue])
+  }
+
+  return Object.fromEntries(entries)
+}
+
 function assertEventListener(
   type: SparkleUpdaterEventType,
   listener: unknown,
@@ -362,6 +495,14 @@ function isEventType(value: string): value is SparkleUpdaterEventType {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false
+  }
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
 const nativeSubscription = Symbol('electron-sparkle.nativeSubscription')

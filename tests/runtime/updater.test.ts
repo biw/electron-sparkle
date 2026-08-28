@@ -10,8 +10,13 @@ interface FakeBridge {
   adapter: NativeSparkleAdapter
   emit(value: unknown): void
   readonly calls: {
+    order: string[]
     start: number
     checkForUpdates: number
+    checkForUpdatesInBackground: number
+    continuedRelaunches: string[]
+    httpHeaders: Record<string, string>[]
+    relaunchPostponementEnabled: boolean[]
     automaticallyChecksForUpdates: boolean[]
     automaticallyDownloadsUpdates: boolean[]
   }
@@ -24,6 +29,7 @@ const READY_PROCESS: ProcessLike = {
 }
 
 const noopListener = () => undefined
+const waitForAsyncHandlers = () => new Promise<void>((resolve) => setImmediate(resolve))
 
 function createReadyUpdater(bridge: FakeBridge, process: ProcessLike = READY_PROCESS) {
   return createSparkleUpdater({
@@ -43,8 +49,13 @@ function createFakeBridge(
 ): FakeBridge {
   let listener: ((event: unknown) => void) | undefined
   const calls = {
+    order: [] as string[],
     start: 0,
     checkForUpdates: 0,
+    checkForUpdatesInBackground: 0,
+    continuedRelaunches: [] as string[],
+    httpHeaders: [] as Record<string, string>[],
+    relaunchPostponementEnabled: [] as boolean[],
     automaticallyChecksForUpdates: [] as boolean[],
     automaticallyDownloadsUpdates: [] as boolean[],
   }
@@ -52,10 +63,22 @@ function createFakeBridge(
   return {
     adapter: {
       start: () => {
+        calls.order.push('start')
         calls.start += 1
       },
       checkForUpdates: () => {
         calls.checkForUpdates += 1
+      },
+      checkForUpdatesInBackground: () => {
+        calls.checkForUpdatesInBackground += 1
+      },
+      continueRelaunch: (requestID) => {
+        calls.continuedRelaunches.push(requestID)
+        return true
+      },
+      setHTTPHeaders: (headers) => {
+        calls.order.push('setHTTPHeaders')
+        calls.httpHeaders.push(headers)
       },
       getState: () => state,
       setAutomaticallyChecksForUpdates: (enabled) => {
@@ -63,6 +86,10 @@ function createFakeBridge(
       },
       setAutomaticallyDownloadsUpdates: (enabled) => {
         calls.automaticallyDownloadsUpdates.push(enabled)
+      },
+      setRelaunchPostponementEnabled: (enabled) => {
+        calls.order.push(`setRelaunchPostponementEnabled:${enabled}`)
+        calls.relaunchPostponementEnabled.push(enabled)
       },
       subscribe: (next) => {
         listener = next
@@ -137,11 +164,76 @@ test('starts exactly once and exposes state only after native initialization', a
   assert.equal(bridge.calls.start, 1)
 })
 
+test('applies buffered HTTP headers before native startup', async () => {
+  const bridge = createFakeBridge()
+  const updater = createReadyUpdater(bridge)
+  const headers = { 'X-Example-Authorization': 'placeholder' }
+
+  updater.setHTTPHeaders(headers)
+  headers['X-Example-Authorization'] = 'changed-after-configuration'
+  await updater.start()
+
+  assert.deepEqual(bridge.calls.order, [
+    'setHTTPHeaders',
+    'setRelaunchPostponementEnabled:false',
+    'start',
+  ])
+  assert.deepEqual(bridge.calls.httpHeaders, [{ 'X-Example-Authorization': 'placeholder' }])
+})
+
+test('refreshes and clears HTTP headers after startup', async () => {
+  const bridge = createFakeBridge()
+  const updater = createReadyUpdater(bridge)
+  await updater.start()
+
+  const refreshedHeaders = { 'X-Example-Authorization': 'refreshed-placeholder' }
+  updater.setHTTPHeaders(refreshedHeaders)
+  refreshedHeaders['X-Example-Authorization'] = 'changed-after-refresh'
+  updater.setHTTPHeaders({})
+
+  assert.deepEqual(bridge.calls.httpHeaders, [
+    {},
+    { 'X-Example-Authorization': 'refreshed-placeholder' },
+    {},
+  ])
+})
+
+test('rejects malformed HTTP header objects without exposing their values', () => {
+  const updater = createReadyUpdater(createFakeBridge())
+  const privatePlaceholder = 'private-placeholder-value'
+  const accessorHeaders = Object.defineProperty({}, 'X-Example', {
+    enumerable: true,
+    get: () => {
+      throw new Error(privatePlaceholder)
+    },
+  })
+  const invalidHeaders: unknown[] = [
+    null,
+    [],
+    accessorHeaders,
+    { 'Invalid Header Name': privatePlaceholder },
+    { 'X-Example': `prefix\r\n${privatePlaceholder}` },
+    { 'X-Example': 123 },
+    { 'X-Example': 'first', 'x-example': privatePlaceholder },
+  ]
+
+  for (const headers of invalidHeaders) {
+    assert.throws(
+      () => {
+        // @ts-expect-error JavaScript callers can pass untyped values at runtime.
+        updater.setHTTPHeaders(headers)
+      },
+      (error: unknown) => error instanceof TypeError && !error.message.includes(privatePlaceholder),
+    )
+  }
+})
+
 test('requires start before controlling Sparkle', () => {
   const bridge = createFakeBridge()
   const updater = createReadyUpdater(bridge)
 
   assert.throws(() => updater.checkForUpdates(), UpdaterNotStartedError)
+  assert.throws(() => updater.checkForUpdatesInBackground(), UpdaterNotStartedError)
   assert.throws(() => updater.getState(), UpdaterNotStartedError)
   assert.throws(() => updater.setAutomaticallyChecksForUpdates(true), UpdaterNotStartedError)
   assert.throws(() => updater.setAutomaticallyDownloadsUpdates(true), UpdaterNotStartedError)
@@ -168,14 +260,18 @@ test('subscribes before start and cleans up a failed native start', async () => 
       })
     },
     checkForUpdates: () => undefined,
+    checkForUpdatesInBackground: () => undefined,
+    continueRelaunch: () => true,
     getState: () => ({
       automaticallyChecksForUpdates: false,
       automaticallyDownloadsUpdates: false,
       canCheckForUpdates: true,
       sessionInProgress: false,
     }),
+    setHTTPHeaders: () => undefined,
     setAutomaticallyChecksForUpdates: () => undefined,
     setAutomaticallyDownloadsUpdates: () => undefined,
+    setRelaunchPostponementEnabled: () => undefined,
     subscribe: (listener) => {
       next = listener
       return { cancel: () => (cancelCount += 1) }
@@ -229,6 +325,7 @@ test('forwards controls and dispatches normalized native events', async () => {
   await updater.start()
 
   updater.checkForUpdates()
+  updater.checkForUpdatesInBackground()
   updater.setAutomaticallyChecksForUpdates(false)
   updater.setAutomaticallyDownloadsUpdates(true)
   bridge.emit({
@@ -255,6 +352,7 @@ test('forwards controls and dispatches normalized native events', async () => {
   })
 
   assert.equal(bridge.calls.checkForUpdates, 1)
+  assert.equal(bridge.calls.checkForUpdatesInBackground, 1)
   assert.deepEqual(bridge.calls.automaticallyChecksForUpdates, [false])
   assert.deepEqual(bridge.calls.automaticallyDownloadsUpdates, [true])
   assert.deepEqual(available, ['200'])
@@ -263,6 +361,146 @@ test('forwards controls and dispatches normalized native events', async () => {
   assert.equal(errors[0]?.message, 'network unavailable')
   assert.equal((errors[0] as Error & { code?: number }).code, 42)
   assert.equal((errors[0] as Error & { domain?: string }).domain, 'SUSparkleErrorDomain')
+})
+
+test('waits for the configured handler before continuing a relaunch', async () => {
+  const bridge = createFakeBridge()
+  const updater = createReadyUpdater(bridge)
+  const beforeRelaunchNotifications: string[] = []
+  const preparedVersions: string[] = []
+  let finishPreparation: (() => void) | undefined
+  const preparation = new Promise<void>((resolve) => {
+    finishPreparation = resolve
+  })
+
+  updater.setBeforeRelaunchHandler(async (update) => {
+    preparedVersions.push(update.version)
+    await preparation
+  })
+  updater.on('before-relaunch', () => beforeRelaunchNotifications.push('before-relaunch'))
+  await updater.start()
+  bridge.emit({
+    type: 'relaunch-requested',
+    relaunchRequestID: 'request-1',
+    update: { displayVersion: '2.0.0', version: '200' },
+  })
+  await waitForAsyncHandlers()
+
+  assert.deepEqual(preparedVersions, ['200'])
+  assert.deepEqual(bridge.calls.continuedRelaunches, [])
+  assert.deepEqual(beforeRelaunchNotifications, [])
+
+  finishPreparation?.()
+  await preparation
+  await waitForAsyncHandlers()
+
+  assert.deepEqual(bridge.calls.continuedRelaunches, ['request-1'])
+  assert.deepEqual(bridge.calls.relaunchPostponementEnabled, [true])
+  assert.deepEqual(beforeRelaunchNotifications, [])
+
+  bridge.emit({ type: 'before-relaunch' })
+  assert.deepEqual(beforeRelaunchNotifications, ['before-relaunch'])
+})
+
+test('reports thrown and rejected relaunch handlers without exposing failure details', async () => {
+  const failures = [
+    () => {
+      throw new Error('private synchronous cleanup detail')
+    },
+    async () => {
+      throw new Error('private asynchronous cleanup detail')
+    },
+  ]
+
+  await Promise.all(
+    failures.map(async (failure, index) => {
+      const bridge = createFakeBridge()
+      const updater = createReadyUpdater(bridge)
+      const errors: Error[] = []
+      updater.on('error', (event) => errors.push(event.error))
+      updater.setBeforeRelaunchHandler(failure)
+      await updater.start()
+
+      const requestID = `request-${index}`
+      const event = {
+        type: 'relaunch-requested',
+        relaunchRequestID: requestID,
+        update: { displayVersion: '2.0.0', version: '200' },
+      }
+      bridge.emit(event)
+      bridge.emit(event)
+      await waitForAsyncHandlers()
+
+      assert.deepEqual(bridge.calls.continuedRelaunches, [requestID])
+      const [error] = errors
+      assert.ok(error instanceof SparkleUpdaterError)
+      assert.equal(error.code, 'BEFORE_RELAUNCH_HANDLER_FAILED')
+      assert.equal(error.message, 'The application failed to prepare for the update relaunch.')
+      assert.equal(error.cause, undefined)
+    }),
+  )
+})
+
+test('handler replacement and clearing affect future relaunch requests', async () => {
+  const bridge = createFakeBridge()
+  const updater = createReadyUpdater(bridge)
+  const preparedVersions: string[] = []
+  updater.setBeforeRelaunchHandler(() => {
+    preparedVersions.push('initial')
+  })
+  await updater.start()
+  updater.setBeforeRelaunchHandler((update) => {
+    preparedVersions.push(update.version)
+  })
+
+  bridge.emit({
+    type: 'relaunch-requested',
+    relaunchRequestID: 'request-3',
+    update: { displayVersion: '3.0.0', version: '300' },
+  })
+  await waitForAsyncHandlers()
+  updater.setBeforeRelaunchHandler(null)
+  bridge.emit({
+    type: 'relaunch-requested',
+    relaunchRequestID: 'request-4',
+    update: { displayVersion: '4.0.0', version: '400' },
+  })
+  await waitForAsyncHandlers()
+
+  assert.deepEqual(preparedVersions, ['300'])
+  assert.deepEqual(bridge.calls.continuedRelaunches, ['request-3', 'request-4'])
+  assert.deepEqual(bridge.calls.relaunchPostponementEnabled, [true, true, false])
+})
+
+test('a dispatched relaunch request keeps its captured handler', async () => {
+  const bridge = createFakeBridge()
+  const updater = createReadyUpdater(bridge)
+  const calls: string[] = []
+  let finishInitialHandler: (() => void) | undefined
+  const initialHandler = new Promise<void>((resolve) => {
+    finishInitialHandler = resolve
+  })
+  updater.setBeforeRelaunchHandler(async () => {
+    calls.push('initial')
+    await initialHandler
+  })
+  await updater.start()
+
+  bridge.emit({
+    type: 'relaunch-requested',
+    relaunchRequestID: 'captured-handler-request',
+    update: { displayVersion: '5.0.0', version: '500' },
+  })
+  await waitForAsyncHandlers()
+  updater.setBeforeRelaunchHandler(() => {
+    calls.push('replacement')
+  })
+  finishInitialHandler?.()
+  await initialHandler
+  await waitForAsyncHandlers()
+
+  assert.deepEqual(calls, ['initial'])
+  assert.deepEqual(bridge.calls.continuedRelaunches, ['captured-handler-request'])
 })
 
 test('retries a failed asynchronous initialization', async () => {
@@ -284,6 +522,40 @@ test('retries a failed asynchronous initialization', async () => {
   await updater.start()
   assert.equal(attempts, 2)
   assert.equal(bridge.calls.start, 1)
+})
+
+test('retains buffered configuration when native startup is retried', async () => {
+  const bridge = createFakeBridge()
+  let nativeStarts = 0
+  const retryingAdapter: NativeSparkleAdapter = {
+    ...bridge.adapter,
+    start: () => {
+      nativeStarts += 1
+      if (nativeStarts === 1) {
+        throw new Error('first native start failed')
+      }
+      bridge.adapter.start()
+    },
+  }
+  const updater = createSparkleUpdater({
+    getElectron: () => ({ app: { isReady: () => true } }),
+    loadNativeAdapter: () => retryingAdapter,
+    process: READY_PROCESS,
+  })
+  const headers = { 'X-Example-Authorization': 'initial-placeholder' }
+  updater.setHTTPHeaders(headers)
+  updater.setBeforeRelaunchHandler(() => undefined)
+
+  await assert.rejects(updater.start(), /first native start failed/)
+  headers['X-Example-Authorization'] = 'changed-after-configuration'
+  await updater.start()
+
+  assert.equal(nativeStarts, 2)
+  assert.deepEqual(bridge.calls.httpHeaders, [
+    { 'X-Example-Authorization': 'initial-placeholder' },
+    { 'X-Example-Authorization': 'initial-placeholder' },
+  ])
+  assert.deepEqual(bridge.calls.relaunchPostponementEnabled, [true, true])
 })
 
 test('resets its lifecycle when native state validation fails after start', async () => {

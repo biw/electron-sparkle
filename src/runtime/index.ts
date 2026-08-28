@@ -5,6 +5,8 @@ export {
 } from './errors.ts'
 export { updater } from './updater.ts'
 export type {
+  SparkleBeforeRelaunchHandler,
+  SparkleHTTPHeaders,
   SparkleUpdate,
   SparkleUpdater,
   SparkleUpdaterEvent,

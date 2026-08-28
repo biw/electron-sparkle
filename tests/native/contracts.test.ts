@@ -27,16 +27,23 @@ test('pins the official Sparkle 2.9.6 package-manager archive', () => {
 })
 
 test('native bridge exposes the runtime adapter contract and event taxonomy', async () => {
-  const source = await readFile(join(packageDirectory, 'src', 'SparkleBridge.swift'), 'utf8')
+  const [source, eventsSource] = await Promise.all([
+    readFile(join(packageDirectory, 'src', 'SparkleBridge.swift'), 'utf8'),
+    readFile(join(packageDirectory, 'src', 'Events.swift'), 'utf8'),
+  ])
   for (const name of [
     'func start()',
     'func checkForUpdates() throws',
+    'func checkForUpdatesInBackground() throws',
+    'func continueRelaunch(_ requestID: String) -> Bool',
     'func getState() -> SparkleUpdaterState',
+    'func setHTTPHeaders(_ headers: [String: String])',
     'func setAutomaticallyChecksForUpdates(_ value: Bool) throws',
     'func setAutomaticallyDownloadsUpdates(_ value: Bool) throws',
+    'func setRelaunchPostponementEnabled(_ enabled: Bool)',
     'func events() -> AsyncStream<SparkleUpdaterEvent>',
   ]) {
-    assert.match(source, new RegExp(name.replace(/[()]/g, '\\$&')))
+    assert.ok(source.includes(name), `Native bridge is missing ${name}`)
   }
   for (const type of [
     'state-changed',
@@ -44,6 +51,7 @@ test('native bridge exposes the runtime adapter contract and event taxonomy', as
     'update-not-available',
     'update-downloaded',
     'before-install',
+    'relaunch-requested',
     'before-relaunch',
     'cycle-complete',
     'error',
@@ -51,6 +59,16 @@ test('native bridge exposes the runtime adapter contract and event taxonomy', as
     assert.match(source, new RegExp(`type: "${type}"`))
   }
   assert.match(source, /SUError\.noUpdateError/)
+  assert.match(source, /shouldPostponeRelaunchForUpdate item: SUAppcastItem/)
+  assert.match(
+    source,
+    /self\.pendingRelaunchRequest = nil\s+pendingRelaunchRequest\.installHandler\(\)/,
+  )
+  assert.match(eventsSource, /let relaunchRequestID: String\?/)
+
+  const headerConfiguration = source.indexOf('controller.updater.httpHeaders = httpHeaders')
+  const nativeStart = source.indexOf('controller.startUpdater()')
+  assert.ok(headerConfiguration >= 0 && headerConfiguration < nativeStart)
 })
 
 test('package metadata configures swift-node to link the staged Sparkle framework', async () => {
@@ -60,8 +78,10 @@ test('package metadata configures swift-node to link the staged Sparkle framewor
     private?: boolean
     scripts?: Record<string, string>
     swiftNode?: unknown
+    version?: string
   }
   assert.equal(manifest.name, 'electron-sparkle')
+  assert.equal(manifest.version, '0.2.0')
   assert.equal(manifest.private, undefined)
   assert.deepEqual(manifest.swiftNode, {
     shipSwiftRuntime: false,

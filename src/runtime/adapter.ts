@@ -8,9 +8,13 @@ import type { SparkleUpdaterEvent, SparkleUpdaterState } from './types.ts'
 export interface NativeSparkleAdapter {
   start(): void
   checkForUpdates(): void
+  checkForUpdatesInBackground(): void
+  continueRelaunch(requestID: string): boolean
   getState(): NativeSparkleUpdaterState
+  setHTTPHeaders(headers: Record<string, string>): void
   setAutomaticallyChecksForUpdates(enabled: boolean): void
   setAutomaticallyDownloadsUpdates(enabled: boolean): void
+  setRelaunchPostponementEnabled(enabled: boolean): void
   subscribe(listener: (event: unknown) => void): NativeUnsubscribe | void
 }
 

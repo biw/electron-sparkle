@@ -35,4 +35,21 @@ struct SparkleUpdaterEvent: Codable {
     let update: SparkleUpdate?
     let error: SparkleUpdaterError?
     let userInitiated: Bool?
+    let relaunchRequestID: String?
+
+    init(
+        type: String,
+        state: SparkleUpdaterState?,
+        update: SparkleUpdate?,
+        error: SparkleUpdaterError?,
+        userInitiated: Bool?,
+        relaunchRequestID: String? = nil
+    ) {
+        self.type = type
+        self.state = state
+        self.update = update
+        self.error = error
+        self.userInitiated = userInitiated
+        self.relaunchRequestID = relaunchRequestID
+    }
 }

@@ -9,7 +9,11 @@ async function smokeTest() {
   updater.on('state-changed', () => {
     stateEvents += 1
   })
+  updater.setHTTPHeaders({ 'X-Example-Authorization': 'placeholder' })
+  updater.setBeforeRelaunchHandler(async () => Promise.resolve())
   await updater.start()
+  updater.setHTTPHeaders({})
+  updater.setBeforeRelaunchHandler(null)
 
   const state = updater.getState()
   if (!state.started) {

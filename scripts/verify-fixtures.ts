@@ -21,6 +21,7 @@ interface Fixture {
 assert.equal(process.platform, 'darwin', 'Fixture verification requires macOS')
 
 const projectDirectory = resolve(import.meta.dirname, '..')
+const packageVersion = await readPackageVersion(join(projectDirectory, 'package.json'))
 const fixtures: Fixture[] = [
   {
     app: resolve(
@@ -84,7 +85,7 @@ async function verifyFixture(fixture: Fixture): Promise<void> {
   assert.deepEqual(JSON.parse(await readFile(installMarker, 'utf8')), {
     schemaVersion: 1,
     packageName: 'electron-sparkle',
-    packageVersion: '0.1.0',
+    packageVersion,
     sparkleVersion: '2.9.6',
   })
   await assertFrameworksContainCodeOnly(frameworks, fixture.name)
@@ -169,6 +170,19 @@ async function assertFrameworksContainCodeOnly(
       `${fixtureName} contains a non-code entry in Contents/Frameworks: ${entry.name}`,
     )
   }
+}
+
+async function readPackageVersion(path: string): Promise<string> {
+  const value: unknown = JSON.parse(await readFile(path, 'utf8'))
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('version' in value) ||
+    typeof value.version !== 'string'
+  ) {
+    throw new Error(`Package manifest is missing a version: ${path}`)
+  }
+  return value.version
 }
 
 type RunOptions = Omit<SpawnSyncOptionsWithStringEncoding, 'encoding' | 'maxBuffer'>
