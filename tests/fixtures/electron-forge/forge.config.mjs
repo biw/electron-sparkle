@@ -30,8 +30,8 @@ export default {
     asar: true,
     electronVersion: '43.4.1',
     name: 'ElectronSparkleForgeFixture',
-    // @electron/osx-sign signs nested code inside-out. `-` is codesign's
-    // ad-hoc identity; validation and timestamps only apply to certificates.
+    // Trusted workflows use @electron/osx-sign to sign nested code inside-out.
+    // `-` is codesign's ad-hoc identity; pull requests leave the fixture unsigned.
     osxSign: shouldSignFixtures
       ? {
           identity: '-',

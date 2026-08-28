@@ -151,7 +151,7 @@ async function verifyFixture(fixture: Fixture): Promise<void> {
     assert.notEqual(
       signatureVerification.status,
       0,
-      `${fixture.name} was signed for an untrusted pull request`,
+      `${fixture.name} was signed when fixture signing was disabled`,
     )
   }
 

@@ -117,9 +117,19 @@ test('deployment runs CI on main and uses the shared trusted-publish workflows',
   )
 })
 
-test('pull request fixture signing is restricted to repository admins', async () => {
-  const [ciWorkflow, forgeConfig, fixtureVerifier] = await Promise.all([
+test('pull requests verify unsigned fixtures outside the protected signing environment', async () => {
+  const [ciWorkflow, builderConfig, forgeConfig, fixtureVerifier] = await Promise.all([
     readFile(join(packageDirectory, '.github', 'workflows', 'ci.yml'), 'utf8'),
+    readFile(
+      join(
+        packageDirectory,
+        'tests',
+        'fixtures',
+        'electron-builder',
+        'electron-builder.config.mjs',
+      ),
+      'utf8',
+    ),
     readFile(
       join(packageDirectory, 'tests', 'fixtures', 'electron-forge', 'forge.config.mjs'),
       'utf8',
@@ -127,23 +137,20 @@ test('pull request fixture signing is restricted to repository admins', async ()
     readFile(join(packageDirectory, 'scripts', 'verify-fixtures.ts'), 'utf8'),
   ])
 
-  assert.doesNotMatch(ciWorkflow, /CSC_FOR_PULL_REQUEST: 'true'/)
-  assert.match(ciWorkflow, /id: signing-policy/)
+  assert.doesNotMatch(ciWorkflow, /CSC_FOR_PULL_REQUEST|signing-policy|collaborators\//)
   assert.match(
     ciWorkflow,
-    /repos\/\$\{GITHUB_REPOSITORY\}\/collaborators\/\$\{PR_AUTHOR\}\/permission/,
-  )
-  assert.match(ciWorkflow, /\[\[ "\$permission" == 'admin' \]\]/)
-  assert.match(
-    ciWorkflow,
-    /CSC_FOR_PULL_REQUEST: \$\{\{ steps\.signing-policy\.outputs\.allowed \}\}/,
+    /environment:\n      name: \$\{\{ github\.event_name == 'pull_request' && 'pull-request' \|\| 'code-signing' \}\}\n      deployment: false/,
   )
   assert.match(
     ciWorkflow,
-    /ELECTRON_SPARKLE_SIGN_FIXTURES: \$\{\{ steps\.signing-policy\.outputs\.allowed \}\}/,
+    /ELECTRON_SPARKLE_SIGN_FIXTURES: \$\{\{ github\.event_name != 'pull_request' \}\}/,
   )
+  assert.match(builderConfig, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
+  assert.match(builderConfig, /identity: shouldSignFixtures \? '-' : null/)
   assert.match(forgeConfig, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
   assert.match(fixtureVerifier, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
+  assert.match(fixtureVerifier, /was signed when fixture signing was disabled/)
 })
 
 test('the root README preserves package integration and operations guidance', async () => {
