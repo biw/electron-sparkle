@@ -104,6 +104,10 @@ test('deployment runs CI on main and uses the shared trusted-publish workflows',
   assert.match(ciWorkflow, /^  workflow_call:$/m)
   assert.match(ciWorkflow, /^  pull_request:$/m)
   assert.match(ciWorkflow, /group: ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.ref \}\}/)
+  assert.match(
+    ciWorkflow,
+    /package-and-fixtures:[\s\S]*?env:\n      CSC_IDENTITY_AUTO_DISCOVERY: 'false'\n      CSC_FOR_PULL_REQUEST: 'true'/,
+  )
   assert.match(releaseWorkflow, /npm-trusted-publish-workflows\/.github\/workflows\/check\.yml@v1/)
   assert.match(releaseWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/)
   assert.match(
