@@ -22,7 +22,6 @@ assert.equal(process.platform, 'darwin', 'Fixture verification requires macOS')
 
 const projectDirectory = resolve(import.meta.dirname, '..')
 const packageVersion = await readPackageVersion(join(projectDirectory, 'package.json'))
-const shouldSignFixtures = process.env.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'
 const fixtures: Fixture[] = [
   {
     app: resolve(
@@ -126,34 +125,15 @@ async function verifyFixture(fixture: Fixture): Promise<void> {
     )
   }
 
-  if (shouldSignFixtures) {
-    run('/usr/bin/codesign', ['--verify', '--deep', '--strict', fixture.app])
-    const signature = run('/usr/bin/codesign', ['--display', '--verbose=2', fixture.app])
-    assert.match(
-      `${signature.stdout}\n${signature.stderr}`,
-      /(?:^|\n)Signature=adhoc(?:\n|$)/,
-      `${fixture.name} was not signed ad hoc by its packager`,
-    )
+  run('/usr/bin/codesign', ['--verify', '--deep', '--strict', fixture.app])
+  const signature = run('/usr/bin/codesign', ['--display', '--verbose=2', fixture.app])
+  assert.match(
+    `${signature.stdout}\n${signature.stderr}`,
+    /(?:^|\n)Signature=adhoc(?:\n|$)/,
+    `${fixture.name} was not signed ad hoc by its packager`,
+  )
 
-    run(process.execPath, [
-      resolve(projectDirectory, 'dist/cli.js'),
-      'doctor',
-      '--app',
-      fixture.app,
-    ])
-  } else {
-    const signatureVerification = spawnSync(
-      '/usr/bin/codesign',
-      ['--verify', '--deep', '--strict', fixture.app],
-      { encoding: 'utf8' },
-    )
-    assert.equal(signatureVerification.error, undefined)
-    assert.notEqual(
-      signatureVerification.status,
-      0,
-      `${fixture.name} was signed when fixture signing was disabled`,
-    )
-  }
+  run(process.execPath, [resolve(projectDirectory, 'dist/cli.js'), 'doctor', '--app', fixture.app])
 
   const resultPath = join(resultDirectory, `${basename(fixture.app)}.json`)
   const executable = join(contents, 'MacOS', fixture.executable)

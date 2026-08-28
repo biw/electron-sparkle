@@ -3,7 +3,6 @@ import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const publicEDKey = Buffer.alloc(32, 42).toString('base64')
-const shouldSignFixtures = process.env.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'
 
 export default {
   appId: 'dev.electron-sparkle.builder-fixture',
@@ -14,10 +13,8 @@ export default {
   files: ['main.cjs', 'package.json'],
   mac: {
     target: 'dir',
-    // Trusted workflows exercise electron-builder's certificate-free signing
-    // path after electron-sparkle stages its native assets. Pull requests leave
-    // the fixture unsigned.
-    identity: shouldSignFixtures ? '-' : null,
+    // `-` is codesign's certificate-free ad-hoc identity.
+    identity: '-',
     hardenedRuntime: false,
     extendInfo: {
       SUFeedURL: 'https://updates.example.invalid/appcast.xml',

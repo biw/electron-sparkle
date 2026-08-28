@@ -117,7 +117,7 @@ test('deployment runs CI on main and uses the shared trusted-publish workflows',
   )
 })
 
-test('pull requests verify unsigned fixtures outside the protected signing environment', async () => {
+test('pull request fixtures use credential-free ad hoc signing', async () => {
   const [ciWorkflow, builderConfig, forgeConfig, fixtureVerifier] = await Promise.all([
     readFile(join(packageDirectory, '.github', 'workflows', 'ci.yml'), 'utf8'),
     readFile(
@@ -137,20 +137,21 @@ test('pull requests verify unsigned fixtures outside the protected signing envir
     readFile(join(packageDirectory, 'scripts', 'verify-fixtures.ts'), 'utf8'),
   ])
 
-  assert.doesNotMatch(ciWorkflow, /CSC_FOR_PULL_REQUEST|signing-policy|collaborators\//)
-  assert.match(
+  assert.doesNotMatch(
     ciWorkflow,
-    /environment:\n      name: \$\{\{ github\.event_name == 'pull_request' && 'pull-request' \|\| 'code-signing' \}\}\n      deployment: false/,
+    /ELECTRON_SPARKLE_SIGN_FIXTURES|code-signing|signing-policy|collaborators\//,
   )
   assert.match(
     ciWorkflow,
-    /ELECTRON_SPARKLE_SIGN_FIXTURES: \$\{\{ github\.event_name != 'pull_request' \}\}/,
+    /package-and-fixtures:[\s\S]*?env:\n      CSC_IDENTITY_AUTO_DISCOVERY: 'false'\n      CSC_FOR_PULL_REQUEST: 'true'/,
   )
-  assert.match(builderConfig, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
-  assert.match(builderConfig, /identity: shouldSignFixtures \? '-' : null/)
-  assert.match(forgeConfig, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
-  assert.match(fixtureVerifier, /process\.env\.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'/)
-  assert.match(fixtureVerifier, /was signed when fixture signing was disabled/)
+  assert.doesNotMatch(builderConfig, /ELECTRON_SPARKLE_SIGN_FIXTURES/)
+  assert.match(builderConfig, /identity: '-',/)
+  assert.doesNotMatch(forgeConfig, /ELECTRON_SPARKLE_SIGN_FIXTURES/)
+  assert.match(forgeConfig, /osxSign: \{[\s\S]*?identity: '-',/)
+  assert.doesNotMatch(fixtureVerifier, /ELECTRON_SPARKLE_SIGN_FIXTURES|signing was disabled/)
+  assert.match(fixtureVerifier, /Signature=adhoc/)
+  assert.match(fixtureVerifier, /codesign', \['--verify', '--deep', '--strict'/)
 })
 
 test('the root README preserves package integration and operations guidance', async () => {

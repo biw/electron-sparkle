@@ -84,12 +84,9 @@ jobs:
       - quality
       - native
     runs-on: macos-15
-    environment:
-      name: ${{ github.event_name == 'pull_request' && 'pull-request' || 'code-signing' }}
-      deployment: false
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      ELECTRON_SPARKLE_SIGN_FIXTURES: ${{ github.event_name != 'pull_request' }}
+      CSC_FOR_PULL_REQUEST: 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: voidzero-dev/setup-vp@v1.18.0
