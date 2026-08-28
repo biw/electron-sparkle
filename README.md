@@ -98,16 +98,59 @@ updater.on('error', ({ error }) => {
 await app.whenReady()
 await updater.start() // idempotent & safe to call concurrently
 
-const currentState = await updater.getState()
+const currentState = updater.getState()
 console.log(currentState)
 
 // Connect this to a “Check for Updates…” menu item.
 updater.checkForUpdates()
 ```
 
-Events are `state-changed`, `update-available`, `update-not-available`, `update-downloaded`, `before-install`, `before-relaunch`, `cycle-complete`, and `error`. Control and state methods throw `UpdaterNotStartedError` until `start()` resolves; environment and native-loading failures use `SparkleUpdaterError` with a stable error code.
+Events are `state-changed`, `update-available`, `update-not-available`, `update-downloaded`, `before-install`, `before-relaunch`, `cycle-complete`, and `error`. Update-check, state, and automatic-setting methods throw `UpdaterNotStartedError` until `start()` resolves. `setHTTPHeaders()` and `setBeforeRelaunchHandler()` may be called before startup. Environment and native-loading failures use `SparkleUpdaterError` with a stable error code.
 
 Update objects include versions and, when supplied by the appcast: title, file/info/release-note URLs, content length, and publication date. The `update-not-available` event also reports Sparkle's optional `userInitiated` flag.
+
+### Authenticate update requests
+
+Set custom HTTP headers before `start()` when an appcast requires authentication. Sparkle applies these headers to appcast, release-note, and update-archive requests:
+
+```ts
+import { app } from 'electron'
+import { updater, type SparkleHTTPHeaders } from 'electron-sparkle'
+
+const getUpdateHeaders = async (): Promise<SparkleHTTPHeaders> => ({
+  Authorization: await getUpdateAuthorizationHeader(),
+})
+
+updater.setHTTPHeaders(await getUpdateHeaders())
+
+await app.whenReady()
+await updater.start()
+```
+
+`setHTTPHeaders()` replaces the full custom-header dictionary. Pass `{}` to clear it. The package copies input objects and never includes header values in updater events or validation errors. Applications should not log these values.
+
+Sparkle normally owns its background-check schedule. Applications that use short-lived credentials should disable that schedule, refresh their credentials, and run background checks from an application-owned timer:
+
+```ts
+updater.setAutomaticallyChecksForUpdates(false)
+
+const checkForUpdatesInBackground = async (): Promise<void> => {
+  updater.setHTTPHeaders(await getUpdateHeaders())
+  updater.checkForUpdatesInBackground()
+}
+```
+
+### Prepare for relaunch
+
+Register one handler when the application must finish asynchronous work before Sparkle relaunches it:
+
+```ts
+updater.setBeforeRelaunchHandler(async (update) => {
+  await prepareApplicationForRelaunch(update)
+})
+```
+
+Sparkle remains postponed until the handler settles. A thrown or rejected handler emits an `error` event with code `BEFORE_RELAUNCH_HANDLER_FAILED`, then allows the relaunch to continue. The package does not impose a timeout. Applications that need a deadline must implement it inside the handler. Pass `null` to disable postponement for future relaunch requests.
 
 ## How do cross-platform updates work?
 
@@ -211,7 +254,7 @@ For the Sparkle portion:
 - Protect server and CI write credentials. EdDSA verifies update archives, but it is not a substitute for securing publication access.
 - CORS headers are unnecessary because Sparkle fetches updates from the native main process, not a browser renderer.
 
-The current runtime does not expose authenticated-feed headers, so the default deployment should be readable without per-user credentials. A dynamic endpoint is optional when the appcast must be generated per request, but authenticated feeds or custom request headers require additional delegate support in electron-sparkle. See Sparkle's [publishing guide](https://sparkle-project.org/documentation/publishing/) for the appcast format, channels, phased rollouts, and signing behavior.
+Private appcasts may require request credentials configured through `setHTTPHeaders()`. The configured headers also apply when Sparkle downloads release notes and update archives. A dynamic endpoint remains optional when the appcast must be generated per request. See Sparkle's [publishing guide](https://sparkle-project.org/documentation/publishing/) for the appcast format, channels, phased rollouts, and signing behavior.
 
 ## Publish an update
 
@@ -309,6 +352,8 @@ A complete end-to-end test still requires two real app versions:
 2. Publish a newer build signed in the same distribution mode to that feed, notarizing it when using Developer ID.
 3. Launch the older build, trigger `updater.checkForUpdates()`—for example, from your own **Check for Updates…** menu item—and install the update.
 4. Confirm that the app relaunches as the newer version and that subsequent checks find no update.
+5. For a private feed, verify that the appcast and archive reject missing credentials, then repeat with configured headers.
+6. When using a relaunch handler, verify that its durable work finishes before the newer process starts.
 
 Do this before every production rollout. It covers feed hosting, version comparison, archive signatures, code signing, installation, and relaunch—areas that package-level tests cannot fully simulate.
 

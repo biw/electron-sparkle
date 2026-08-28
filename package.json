@@ -1,6 +1,6 @@
 {
   "name": "electron-sparkle",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sparkle updates for Electron applications on macOS",
   "keywords": [
     "electron",

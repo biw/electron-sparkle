@@ -73,6 +73,13 @@ const forgeDeclarations = readFileFromTarball(
   mainTarball,
   'package/dist/electron-forge.d.ts',
 ).toString('utf8')
+const mainDeclarations = readFileFromTarball(mainTarball, 'package/dist/index.d.ts').toString(
+  'utf8',
+)
+assert.match(mainDeclarations, /type SparkleHTTPHeaders/)
+assert.match(mainDeclarations, /checkForUpdatesInBackground\(\): void/)
+assert.match(mainDeclarations, /setHTTPHeaders\(headers: SparkleHTTPHeaders\): void/)
+assert.match(mainDeclarations, /setBeforeRelaunchHandler/)
 assert.doesNotMatch(builderDeclarations, /withElectronBuilderSparkle|SparklePackagerOptions/)
 assert.match(forgeDeclarations, /ElectronSparkleOptions/)
 assert.doesNotMatch(

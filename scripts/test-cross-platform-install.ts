@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -10,7 +10,8 @@ if (process.platform === 'darwin') {
 }
 
 const projectDirectory = resolve(import.meta.dirname, '..')
-const mainTarball = resolve(projectDirectory, 'release/electron-sparkle-0.1.0.tgz')
+const packageManifest = await readPackageManifest(join(projectDirectory, 'package.json'))
+const mainTarball = resolve(projectDirectory, 'release', npmTarballName(packageManifest))
 const temporaryDirectory = await mkdtemp(join(tmpdir(), 'electron-sparkle-install-'))
 const vitePlusInstall =
   process.platform === 'win32'
@@ -59,6 +60,31 @@ try {
 
 function fileSpecifier(path: string): string {
   return `file:${path.replaceAll('\\', '/')}`
+}
+
+interface PackageManifest {
+  name: string
+  version: string
+}
+
+async function readPackageManifest(path: string): Promise<PackageManifest> {
+  const value: unknown = JSON.parse(await readFile(path, 'utf8'))
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'string'
+  ) {
+    throw new Error(`Package manifest is missing a name or version: ${path}`)
+  }
+  return { name: value.name, version: value.version }
+}
+
+function npmTarballName(manifest: PackageManifest): string {
+  const packageName = manifest.name.replace(/^@/, '').replaceAll('/', '-')
+  return `${packageName}-${manifest.version}.tgz`
 }
 
 function run(executable: string, arguments_: string[], cwd: string): void {

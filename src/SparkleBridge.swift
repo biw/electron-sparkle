@@ -13,6 +13,11 @@ private enum SparkleBridgeError: LocalizedError {
     }
 }
 
+private struct PendingRelaunchRequest {
+    let identifier: UUID
+    let installHandler: () -> Void
+}
+
 @MainActor
 private final class SparkleBridge: NSObject, SPUUpdaterDelegate {
     static let shared = SparkleBridge()
@@ -21,6 +26,9 @@ private final class SparkleBridge: NSObject, SPUUpdaterDelegate {
     private var stateObservations: [NSKeyValueObservation] = []
     private var streams: [UUID: AsyncStream<SparkleUpdaterEvent>.Continuation] = [:]
     private var reportedErrorKeys: Set<String> = []
+    private var httpHeaders: [String: String]?
+    private var relaunchPostponementEnabled = false
+    private var pendingRelaunchRequest: PendingRelaunchRequest?
 
     private var updater: SPUUpdater? {
         controller?.updater
@@ -35,6 +43,7 @@ private final class SparkleBridge: NSObject, SPUUpdaterDelegate {
             userDriverDelegate: nil,
         )
         self.controller = controller
+        controller.updater.httpHeaders = httpHeaders
         observeState(for: controller.updater)
         controller.startUpdater()
         emitStateChanged()
@@ -43,6 +52,31 @@ private final class SparkleBridge: NSObject, SPUUpdaterDelegate {
     func checkForUpdates() throws {
         guard let controller else { throw SparkleBridgeError.notStarted }
         controller.checkForUpdates(nil)
+    }
+
+    func checkForUpdatesInBackground() throws {
+        guard let updater else { throw SparkleBridgeError.notStarted }
+        updater.checkForUpdatesInBackground()
+    }
+
+    func setHTTPHeaders(_ headers: [String: String]) {
+        httpHeaders = headers.isEmpty ? nil : headers
+        updater?.httpHeaders = httpHeaders
+    }
+
+    func setRelaunchPostponementEnabled(_ enabled: Bool) {
+        relaunchPostponementEnabled = enabled
+    }
+
+    func continueRelaunch(_ requestID: String) -> Bool {
+        guard
+            let pendingRelaunchRequest,
+            pendingRelaunchRequest.identifier.uuidString == requestID
+        else { return false }
+
+        self.pendingRelaunchRequest = nil
+        pendingRelaunchRequest.installHandler()
+        return true
     }
 
     func state() -> SparkleUpdaterState {
@@ -182,6 +216,31 @@ private final class SparkleBridge: NSObject, SPUUpdaterDelegate {
         emit(SparkleUpdaterEvent(type: "before-install", state: state(), update: update(from: item), error: nil, userInitiated: nil))
     }
 
+    func updater(
+        _ updater: SPUUpdater,
+        shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+        untilInvokingBlock installHandler: @escaping () -> Void
+    ) -> Bool {
+        guard relaunchPostponementEnabled, pendingRelaunchRequest == nil else { return false }
+
+        let identifier = UUID()
+        pendingRelaunchRequest = PendingRelaunchRequest(
+            identifier: identifier,
+            installHandler: installHandler
+        )
+        emit(
+            SparkleUpdaterEvent(
+                type: "relaunch-requested",
+                state: state(),
+                update: update(from: item),
+                error: nil,
+                userInitiated: nil,
+                relaunchRequestID: identifier.uuidString
+            )
+        )
+        return true
+    }
+
     func updaterWillRelaunchApplication(_ updater: SPUUpdater) {
         emit(SparkleUpdaterEvent(type: "before-relaunch", state: state(), update: nil, error: nil, userInitiated: nil))
     }
@@ -213,6 +272,30 @@ func start() {
 @MainActor
 func checkForUpdates() throws {
     try SparkleBridge.shared.checkForUpdates()
+}
+
+// @swift-node:export
+@MainActor
+func checkForUpdatesInBackground() throws {
+    try SparkleBridge.shared.checkForUpdatesInBackground()
+}
+
+// @swift-node:export
+@MainActor
+func setHTTPHeaders(_ headers: [String: String]) {
+    SparkleBridge.shared.setHTTPHeaders(headers)
+}
+
+// @swift-node:export
+@MainActor
+func setRelaunchPostponementEnabled(_ enabled: Bool) {
+    SparkleBridge.shared.setRelaunchPostponementEnabled(enabled)
+}
+
+// @swift-node:export
+@MainActor
+func continueRelaunch(_ requestID: String) -> Bool {
+    SparkleBridge.shared.continueRelaunch(requestID)
 }
 
 // @swift-node:export

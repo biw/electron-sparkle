@@ -13,9 +13,7 @@ export default {
   files: ['main.cjs', 'package.json'],
   mac: {
     target: 'dir',
-    // Exercise electron-builder's native certificate-free signing path. The
-    // fixture must be signed by the packager after electron-sparkle stages its
-    // native assets, rather than being repaired by the verification script.
+    // `-` is codesign's certificate-free ad-hoc identity.
     identity: '-',
     hardenedRuntime: false,
     extendInfo: {
