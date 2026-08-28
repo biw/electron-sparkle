@@ -2,6 +2,7 @@ import { ElectronSparkle } from 'electron-sparkle/electron-forge'
 import { writeFileSync } from 'node:fs'
 
 const sparklePublicEDKey = Buffer.alloc(32, 43).toString('base64')
+const shouldSignFixtures = process.env.ELECTRON_SPARKLE_SIGN_FIXTURES !== 'false'
 
 const earlierConfigPlugin = {
   name: 'electron-sparkle-fixture-earlier-config',
@@ -31,16 +32,18 @@ export default {
     name: 'ElectronSparkleForgeFixture',
     // @electron/osx-sign signs nested code inside-out. `-` is codesign's
     // ad-hoc identity; validation and timestamps only apply to certificates.
-    osxSign: {
-      identity: '-',
-      identityValidation: false,
-      preAutoEntitlements: false,
-      preEmbedProvisioningProfile: false,
-      optionsForFile: () => ({
-        hardenedRuntime: false,
-        timestamp: 'none',
-      }),
-    },
+    osxSign: shouldSignFixtures
+      ? {
+          identity: '-',
+          identityValidation: false,
+          preAutoEntitlements: false,
+          preEmbedProvisioningProfile: false,
+          optionsForFile: () => ({
+            hardenedRuntime: false,
+            timestamp: 'none',
+          }),
+        }
+      : false,
   },
   hooks: {
     resolveForgeConfig: async (_config, currentConfig) => ({

@@ -86,8 +86,25 @@ jobs:
     runs-on: macos-15
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      CSC_FOR_PULL_REQUEST: 'true'
     steps:
+      - name: Determine fixture signing policy
+        id: signing-policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          allowed=false
+          if [[ "$GITHUB_EVENT_NAME" != 'pull_request' ]]; then
+            allowed=true
+          elif permission="$(
+            gh api \
+              "repos/${GITHUB_REPOSITORY}/collaborators/${PR_AUTHOR}/permission" \
+              --jq '.permission' \
+              2>/dev/null
+          )" && [[ "$permission" == 'admin' ]]; then
+            allowed=true
+          fi
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
       - uses: voidzero-dev/setup-vp@v1.18.0
         with:
@@ -114,8 +131,14 @@ jobs:
       - run: vp -C tests/fixtures/electron-builder run verify:module-hook
       - run: vp -C tests/fixtures/electron-forge run typecheck
       - run: vp -C tests/fixtures/electron-builder exec electron-builder --config electron-builder.config.mjs --mac dir --universal --publish never
+        env:
+          CSC_FOR_PULL_REQUEST: ${{ steps.signing-policy.outputs.allowed }}
       - run: vp -C tests/fixtures/electron-forge exec electron-forge package --arch arm64 --platform darwin
+        env:
+          ELECTRON_SPARKLE_SIGN_FIXTURES: ${{ steps.signing-policy.outputs.allowed }}
       - run: vp run verify:fixtures
+        env:
+          ELECTRON_SPARKLE_SIGN_FIXTURES: ${{ steps.signing-policy.outputs.allowed }}
       - uses: actions/upload-artifact@v7
         with:
           name: npm-packages
